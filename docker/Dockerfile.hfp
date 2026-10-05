@@ -1,0 +1,31 @@
+# HFP daemon image. Uses the host's bluetoothd over the mounted system D-Bus
+# socket; it never runs its own Bluetooth stack.
+FROM debian:trixie-slim
+
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+        python3 python3-venv python3-pip python3-dbus python3-gi python3-numpy \
+        bluez ffmpeg libsoxr0 libsoxr-dev build-essential pkg-config python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/hfp-mcp
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+COPY setup/test-constraints.txt ./setup/test-constraints.txt
+
+# System site packages supply dbus-python/PyGObject (no native compile).
+RUN python3 -m venv --system-site-packages /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir . \
+         --constraint setup/test-constraints.txt \
+         "mcp>=1.27.0,<2" "uvicorn>=0.30.0,<1" "google-genai>=2.16,<3" "soxr>=0.5,<1"
+
+ENV PATH=/opt/venv/bin:$PATH \
+    XDG_RUNTIME_DIR=/run/hfp-runtime \
+    XDG_STATE_HOME=/data/state \
+    HOME=/data
+
+RUN useradd -u 1000 -m -d /data hfp && mkdir -p /run/hfp-runtime /data/state \
+    && chown -R hfp /run/hfp-runtime /data
+USER hfp
+VOLUME /data
+ENTRYPOINT ["hfp-mcp-server", "--transport", "streamable-http"]
